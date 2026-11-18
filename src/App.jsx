@@ -133,7 +133,7 @@ function App() {
             path="/producer/*"
             element={
               <ProtectedRoute allowedRoles={['PRODUCTEUR']} session={session} loading={authLoading}>
-                <ProducerRoutes session={session} online={online} onLogout={handleLogout} />
+                <ProducerRoutes session={session} onSessionChange={setSession} online={online} onLogout={handleLogout} />
               </ProtectedRoute>
             }
           />
@@ -142,7 +142,7 @@ function App() {
             path="/admin/*"
             element={
               <ProtectedRoute allowedRoles={['ADMIN']} session={session} loading={authLoading}>
-                <AdminRoutes session={session} online={online} onLogout={handleLogout} />
+                <AdminRoutes session={session} onSessionChange={setSession} online={online} onLogout={handleLogout} />
               </ProtectedRoute>
             }
           />
@@ -358,7 +358,7 @@ function ForgotPasswordPage() {
   );
 }
 
-function ProducerRoutes({ session, online, onLogout }) {
+function ProducerRoutes({ session, onSessionChange, online, onLogout }) {
   const producer = producers[0];
   const producerParcels = parcels.filter((parcel) => parcel.producerId === producer.id);
   const producerCycles = cultivationCycles.filter((cycle) => cycle.producerId === producer.id);
@@ -368,7 +368,7 @@ function ProducerRoutes({ session, online, onLogout }) {
     <DashboardLayout session={session} role="PRODUCTEUR" online={online} onLogout={onLogout}>
       <Routes>
         <Route path="dashboard" element={<ProducerDashboard producer={producer} parcels={producerParcels} cycles={producerCycles} harvests={myHarvests} />} />
-        <Route path="profile" element={<ProducerProfile producer={producer} />} />
+        <Route path="profile" element={<ProducerProfile session={session} onSessionChange={onSessionChange} />} />
         <Route path="parcels" element={<ProducerParcels parcels={producerParcels} />} />
         <Route path="parcels/new" element={<ParcelForm />} />
         <Route path="cycles" element={<ProducerCycles cycles={producerCycles} />} />
@@ -382,11 +382,12 @@ function ProducerRoutes({ session, online, onLogout }) {
   );
 }
 
-function AdminRoutes({ session, online, onLogout }) {
+function AdminRoutes({ session, onSessionChange, online, onLogout }) {
   return (
     <DashboardLayout session={session} role="ADMIN" online={online} onLogout={onLogout}>
       <Routes>
         <Route path="dashboard" element={<AdminDashboard online={online} />} />
+        <Route path="profile" element={<AdminProfile session={session} onSessionChange={onSessionChange} />} />
         <Route path="producers" element={<AdminProducers />} />
         <Route path="producers/:id" element={<ProducerDetails />} />
         <Route path="parcels" element={<AdminParcels />} />
@@ -441,31 +442,538 @@ function ProducerDashboard({ producer, parcels, cycles, harvests }) {
   );
 }
 
-function ProducerProfile({ producer }) {
+function ProducerProfile({ session, onSessionChange }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    phone: '',
+    country: 'Côte d’Ivoire',
+    region: '',
+    department: '',
+    subPrefecture: '',
+    city: '',
+    locality: '',
+  });
+  const [profileStatus, setProfileStatus] = useState('ACTIVE');
+
+  useEffect(() => {
+    let active = true;
+    async function loadProfile() {
+      setLoading(true);
+      setErrorMessage('');
+      try {
+        if (!supabase) {
+          const mock = producers[0];
+          if (active) {
+            setFormData({
+              firstName: mock.firstName || '',
+              lastName: mock.lastName || '',
+              phone: mock.phone || '',
+              country: mock.country || 'Côte d’Ivoire',
+              region: mock.region || '',
+              department: mock.department || '',
+              subPrefecture: mock.subPrefecture || '',
+              city: mock.city || '',
+              locality: mock.locality || '',
+            });
+            setProfileStatus(mock.status || 'ACTIVE');
+          }
+          return;
+        }
+
+        // 1. Lire profiles
+        const { data: profileData, error: profileErr } = await supabase
+          .from('profiles')
+          .select('full_name, phone, status')
+          .eq('id', session.id)
+          .single();
+
+        if (profileErr) throw profileErr;
+        if (profileData?.status) setProfileStatus(profileData.status);
+
+        // 2. Lire producers
+        const { data: producerData, error: prodErr } = await supabase
+          .from('producers')
+          .select('*')
+          .eq('user_id', session.id)
+          .maybeSingle();
+
+        if (prodErr && prodErr.code !== 'PGRST116') throw prodErr;
+
+        if (active) {
+          if (producerData) {
+            setFormData({
+              firstName: producerData.first_name || '',
+              lastName: producerData.last_name || '',
+              phone: producerData.phone || profileData?.phone || '',
+              country: producerData.country || 'Côte d’Ivoire',
+              region: producerData.region || '',
+              department: producerData.department || '',
+              subPrefecture: producerData.sub_prefecture || '',
+              city: producerData.city || '',
+              locality: producerData.locality || '',
+            });
+          } else {
+            const names = (profileData?.full_name || session?.fullName || '').split(' ');
+            const firstName = names[0] || '';
+            const lastName = names.slice(1).join(' ') || '';
+            setFormData({
+              firstName,
+              lastName,
+              phone: profileData?.phone || '',
+              country: 'Côte d’Ivoire',
+              region: '',
+              department: '',
+              subPrefecture: '',
+              city: '',
+              locality: '',
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Erreur chargement profil:', err);
+        if (active) setErrorMessage('Impossible de charger les données du profil.');
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    if (session?.id) {
+      loadProfile();
+    }
+    return () => { active = false; };
+  }, [session]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setSuccessMessage('');
+    setErrorMessage('');
+
+    const fullName = `${formData.firstName.trim()} ${formData.lastName.trim()}`.trim() || session.fullName;
+
+    try {
+      if (supabase && session?.id) {
+        // 1. Mettre a jour profiles
+        const { error: profileUpdateErr } = await supabase
+          .from('profiles')
+          .update({
+            full_name: fullName,
+            phone: formData.phone.trim(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', session.id);
+
+        if (profileUpdateErr) throw profileUpdateErr;
+
+        // 2. Mettre a jour ou creer le producteur dans producers
+        const { data: existingProducer } = await supabase
+          .from('producers')
+          .select('id')
+          .eq('user_id', session.id)
+          .maybeSingle();
+
+        const producerPayload = {
+          user_id: session.id,
+          first_name: formData.firstName.trim(),
+          last_name: formData.lastName.trim(),
+          phone: formData.phone.trim(),
+          country: formData.country.trim(),
+          region: formData.region.trim(),
+          department: formData.department.trim(),
+          sub_prefecture: formData.subPrefecture.trim(),
+          city: formData.city.trim(),
+          locality: formData.locality.trim(),
+          updated_at: new Date().toISOString(),
+        };
+
+        if (existingProducer?.id) {
+          const { error: prodUpdateErr } = await supabase
+            .from('producers')
+            .update(producerPayload)
+            .eq('id', existingProducer.id);
+
+          if (prodUpdateErr) throw prodUpdateErr;
+        } else {
+          const { error: prodInsertErr } = await supabase
+            .from('producers')
+            .insert(producerPayload);
+
+          if (prodInsertErr) throw prodInsertErr;
+        }
+      }
+
+      if (onSessionChange) {
+        onSessionChange((prev) => ({
+          ...prev,
+          fullName,
+        }));
+      }
+
+      setSuccessMessage('Vos informations de profil ont été enregistrées avec succès !');
+    } catch (err) {
+      console.error('Erreur mise à jour profil:', err);
+      setErrorMessage(err.message || 'Une erreur est survenue lors de l’enregistrement.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="page-stack">
+        <header className="page-header">
+          <div><p className="eyebrow">Profil</p><h2>Mon profil</h2></div>
+        </header>
+        <div className="section-card"><p>Chargement des informations du profil…</p></div>
+      </div>
+    );
+  }
+
+  const initialLetter = (formData.firstName?.charAt(0) || formData.lastName?.charAt(0) || session?.fullName?.charAt(0) || 'P').toUpperCase();
+
   return (
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <p className="eyebrow">Profil</p>
+          <p className="eyebrow">Espace producteur</p>
           <h2>Mon profil</h2>
         </div>
       </header>
+
+      {successMessage && (
+        <div className="alert-success" role="status">
+          ✓ {successMessage}
+        </div>
+      )}
+      {errorMessage && (
+        <div className="alert-error" role="alert">
+          ⚠ {errorMessage}
+        </div>
+      )}
+
       <div className="section-card profile-card">
         <div className="profile-hero">
-          <div className="avatar-large">{producer.firstName.charAt(0)}</div>
+          <div className="avatar-large">{initialLetter}</div>
           <div>
-            <h3>{producer.firstName} {producer.lastName}</h3>
-            <p>{producer.locality} • {producer.region}</p>
+            <h3>{formData.firstName || formData.lastName ? `${formData.firstName} ${formData.lastName}`.trim() : session?.fullName}</h3>
+            <p>
+              {formData.locality ? formData.locality : 'Localité non renseignée'}
+              {formData.region ? ` • ${formData.region}` : ''}
+            </p>
+            <span className={`badge ${statusBadgeColors[profileStatus] || 'badge-success'}`}>
+              {profileStatus === 'ACTIVE' ? 'Compte actif' : profileStatus === 'PENDING' ? 'En attente' : profileStatus}
+            </span>
           </div>
         </div>
-        <div className="details-grid">
-          <div><strong>Téléphone</strong><span>{producer.phone}</span></div>
-          <div><strong>Département</strong><span>{producer.department}</span></div>
-          <div><strong>Ville</strong><span>{producer.city}</span></div>
-          <div><strong>Statut</strong><span className={`badge ${statusBadgeColors[producer.status] || ''}`}>{producer.status}</span></div>
+      </div>
+
+      <div className="section-card">
+        <div className="section-head">
+          <h3>Informations personnelles & localisation</h3>
+          <p className="section-hint">Renseignez vos coordonnées et la zone géographique de votre exploitation agricole.</p>
         </div>
+
+        <form onSubmit={handleSubmit} className="form-grid two-columns">
+          <label>
+            Prénom
+            <input
+              name="firstName"
+              type="text"
+              placeholder="Ex: Ahou"
+              value={formData.firstName}
+              onChange={handleChange}
+              required
+            />
+          </label>
+
+          <label>
+            Nom de famille
+            <input
+              name="lastName"
+              type="text"
+              placeholder="Ex: Kouassi"
+              value={formData.lastName}
+              onChange={handleChange}
+              required
+            />
+          </label>
+
+          <label>
+            Numéro de téléphone
+            <input
+              name="phone"
+              type="tel"
+              placeholder="Ex: +225 07 12 34 56 78"
+              value={formData.phone}
+              onChange={handleChange}
+            />
+          </label>
+
+          <label>
+            Adresse e-mail (liée au compte)
+            <input
+              type="email"
+              value={session?.email || ''}
+              disabled
+              title="L'adresse e-mail est gérée par votre compte d'authentification"
+            />
+          </label>
+
+          <label>
+            Pays
+            <input
+              name="country"
+              type="text"
+              value={formData.country}
+              onChange={handleChange}
+              required
+            />
+          </label>
+
+          <label>
+            Région
+            <input
+              name="region"
+              type="text"
+              placeholder="Ex: Lagunes, San-Pédro, Gbêkê…"
+              value={formData.region}
+              onChange={handleChange}
+              required
+            />
+          </label>
+
+          <label>
+            Département
+            <input
+              name="department"
+              type="text"
+              placeholder="Ex: Abidjan, Dabou, Bouaké…"
+              value={formData.department}
+              onChange={handleChange}
+            />
+          </label>
+
+          <label>
+            Sous-préfecture
+            <input
+              name="subPrefecture"
+              type="text"
+              placeholder="Ex: Yopougon, Songon…"
+              value={formData.subPrefecture}
+              onChange={handleChange}
+            />
+          </label>
+
+          <label>
+            Ville
+            <input
+              name="city"
+              type="text"
+              placeholder="Ex: Abidjan"
+              value={formData.city}
+              onChange={handleChange}
+            />
+          </label>
+
+          <label>
+            Localité / Village
+            <input
+              name="locality"
+              type="text"
+              placeholder="Ex: Maféré, village…"
+              value={formData.locality}
+              onChange={handleChange}
+              required
+            />
+          </label>
+
+          <div className="full-span" style={{ marginTop: '12px' }}>
+            <button type="submit" className="primary-btn" disabled={saving}>
+              {saving ? 'Enregistrement en cours…' : 'Enregistrer mon profil'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
+  );
+}
+
+function AdminProfile({ session, onSessionChange }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [formData, setFormData] = useState({
+    fullName: session?.fullName || '',
+    phone: '',
+  });
+
+  useEffect(() => {
+    let active = true;
+    async function loadProfile() {
+      setLoading(true);
+      try {
+        if (!supabase) {
+          if (active) setLoading(false);
+          return;
+        }
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('full_name, phone')
+          .eq('id', session.id)
+          .single();
+
+        if (error) throw error;
+        if (active && data) {
+          setFormData({
+            fullName: data.full_name || session?.fullName || '',
+            phone: data.phone || '',
+          });
+        }
+      } catch (err) {
+        console.error('Erreur profil admin:', err);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    if (session?.id) loadProfile();
+    return () => { active = false; };
+  }, [session]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setSuccessMessage('');
+    setErrorMessage('');
+
+    try {
+      if (supabase && session?.id) {
+        const { error } = await supabase
+          .from('profiles')
+          .update({
+            full_name: formData.fullName.trim(),
+            phone: formData.phone.trim(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', session.id);
+
+        if (error) throw error;
+      }
+
+      if (onSessionChange) {
+        onSessionChange((prev) => ({
+          ...prev,
+          fullName: formData.fullName.trim(),
+        }));
+      }
+
+      setSuccessMessage('Profil administrateur mis à jour avec succès !');
+    } catch (err) {
+      console.error('Erreur mise à jour profil admin:', err);
+      setErrorMessage(err.message || 'Impossible de mettre à jour le profil.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const initial = (formData.fullName?.charAt(0) || session?.fullName?.charAt(0) || 'A').toUpperCase();
+
+  return (
+    <AdminPage
+      eyebrow="Mon compte"
+      title="Profil Administrateur"
+      description="Consultez et modifiez les informations associées à votre compte administrateur ManiTrack."
+    >
+      {successMessage && <div className="alert-success" role="status">✓ {successMessage}</div>}
+      {errorMessage && <div className="alert-error" role="alert">⚠ {errorMessage}</div>}
+
+      <section className="admin-profile-hero">
+        <div className="admin-profile-avatar">{initial}</div>
+        <div className="admin-profile-main">
+          <span className="admin-kicker">Administrateur</span>
+          <h2>{formData.fullName || session?.fullName}</h2>
+          <p>{session?.email}</p>
+        </div>
+        <span className="admin-status-badge is-active">Actif</span>
+      </section>
+
+      <section className="admin-panel">
+        <div className="admin-panel-heading">
+          <div>
+            <h2>Modifier mes informations</h2>
+            <p>Ces informations s'affichent sur votre compte et dans la console d'administration.</p>
+          </div>
+        </div>
+
+        {loading ? (
+          <p style={{ padding: '16px' }}>Chargement du profil…</p>
+        ) : (
+          <form onSubmit={handleSubmit} className="form-grid two-columns" style={{ padding: '16px' }}>
+            <label>
+              Nom complet
+              <input
+                name="fullName"
+                type="text"
+                placeholder="Ex: Cyr Kahiba"
+                value={formData.fullName}
+                onChange={handleChange}
+                required
+              />
+            </label>
+
+            <label>
+              Numéro de téléphone
+              <input
+                name="phone"
+                type="tel"
+                placeholder="Ex: +225 07 12 34 56 78"
+                value={formData.phone}
+                onChange={handleChange}
+              />
+            </label>
+
+            <label>
+              Adresse e-mail
+              <input
+                type="email"
+                value={session?.email || ''}
+                disabled
+              />
+            </label>
+
+            <label>
+              Rôle système
+              <input
+                type="text"
+                value="ADMIN (Administrateur)"
+                disabled
+              />
+            </label>
+
+            <div className="full-span" style={{ marginTop: '12px' }}>
+              <button type="submit" className="primary-btn" disabled={saving}>
+                {saving ? 'Enregistrement…' : 'Enregistrer les modifications'}
+              </button>
+            </div>
+          </form>
+        )}
+      </section>
+    </AdminPage>
   );
 }
 

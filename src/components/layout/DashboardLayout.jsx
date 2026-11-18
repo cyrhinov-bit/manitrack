@@ -18,7 +18,10 @@ const menuGroups = {
   ADMIN: [
     {
       label: 'VUE GÉNÉRALE',
-      items: [{ label: 'Tableau de bord', to: '/admin/dashboard', icon: LayoutDashboard }],
+      items: [
+        { label: 'Tableau de bord', to: '/admin/dashboard', icon: LayoutDashboard },
+        { label: 'Mon profil', to: '/admin/profile', icon: UserRound },
+      ],
     },
     {
       label: 'GESTION AGRICOLE',
@@ -70,6 +73,7 @@ const menuGroups = {
 
 const pageTitles = {
   '/admin/dashboard': 'Tableau de bord',
+  '/admin/profile': 'Mon profil',
   '/admin/producers': 'Producteurs',
   '/admin/parcels': 'Parcelles',
   '/admin/map': 'Cartographie',

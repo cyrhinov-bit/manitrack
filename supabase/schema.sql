@@ -167,7 +167,7 @@ $$;
 
 CREATE POLICY "Users can read own profile" ON profiles FOR SELECT USING (id = auth.uid());
 CREATE POLICY "Admins can read all profiles" ON profiles FOR SELECT USING (public.is_active_admin());
-CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (id = auth.uid()) WITH CHECK (id = auth.uid() AND role = 'PRODUCTEUR');
+CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (id = auth.uid()) WITH CHECK (id = auth.uid());
 
 CREATE POLICY "Admins can manage all producers" ON producers FOR ALL USING (
   EXISTS (

@@ -392,8 +392,32 @@ table {
 th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--border); }
 th { color: var(--forest-dark); }
 
-.sync-indicator.online { background: var(--forest-soft); color: var(--forest-dark); }
-.sync-indicator.offline { background: var(--danger-soft); color: var(--danger); }
+.alert-success {
+  background: #e6f4eb;
+  border: 1px solid #bce2cb;
+  color: #1e6b41;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-weight: 500;
+  margin-bottom: 16px;
+}
+
+.alert-error {
+  background: #ffebe8;
+  border: 1px solid #f3c6be;
+  color: #9c3829;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-weight: 500;
+  margin-bottom: 16px;
+}
+
+.section-hint {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 4px 0 0 0;
+}
+
 
 .adminbsb-app.theme-green .navbar {
   background-color: var(--brand-green) !important;
