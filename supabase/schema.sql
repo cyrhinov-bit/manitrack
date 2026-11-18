@@ -133,16 +133,40 @@ ALTER TABLE field_post_photos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE admin_post_notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Admins can read all profiles" ON profiles FOR SELECT USING (
-  EXISTS (
-    SELECT 1 FROM profiles current_profile
-    WHERE current_profile.id = auth.uid()
-      AND current_profile.role = 'ADMIN'
-      AND current_profile.status = 'ACTIVE'
-  )
-);
+CREATE OR REPLACE FUNCTION public.is_active_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.profiles
+    WHERE id = auth.uid()
+      AND role = 'ADMIN'
+      AND status = 'ACTIVE'
+  );
+$$;
 
-CREATE POLICY "Producers can read own profile" ON profiles FOR SELECT USING (id = auth.uid());
+CREATE OR REPLACE FUNCTION public.is_active_producer()
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.profiles
+    WHERE id = auth.uid()
+      AND role = 'PRODUCTEUR'
+      AND status = 'ACTIVE'
+  );
+$$;
+
+CREATE POLICY "Users can read own profile" ON profiles FOR SELECT USING (id = auth.uid());
+CREATE POLICY "Admins can read all profiles" ON profiles FOR SELECT USING (public.is_active_admin());
 CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (id = auth.uid()) WITH CHECK (id = auth.uid() AND role = 'PRODUCTEUR');
 
 CREATE POLICY "Admins can manage all producers" ON producers FOR ALL USING (
@@ -291,34 +315,6 @@ CREATE POLICY "Admins can insert audit logs" ON audit_logs FOR INSERT WITH CHECK
       AND admin_profile.status = 'ACTIVE'
   )
 );
-
-CREATE OR REPLACE FUNCTION public.is_active_admin()
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM public.profiles
-    WHERE id = auth.uid()
-      AND role = 'ADMIN'
-      AND status = 'ACTIVE'
-  );
-$$;
-
-CREATE OR REPLACE FUNCTION public.is_active_producer()
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM public.profiles
-    WHERE id = auth.uid()
-      AND role = 'PRODUCTEUR'
-      AND status = 'ACTIVE'
-  );
-$$;
 
 CREATE OR REPLACE FUNCTION public.enforce_profile_role()
 RETURNS TRIGGER
