@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
 import {
+  Camera,
   CheckCircle2,
   Clock3,
   Eye,
@@ -13,6 +14,7 @@ import {
   Search,
   ShieldCheck,
   Sprout,
+  Trash2,
   TrendingUp,
   Users,
   Warehouse,
@@ -171,12 +173,33 @@ async function getAppSession(user) {
     throw new Error('Le rôle associé à ce compte ne permet pas d’accéder à ManiTrack.');
   }
 
+  let avatarUrl = '';
+  if (profile.role === 'PRODUCTEUR') {
+    const { data: prodData } = await supabase
+      .from('producers')
+      .select('profile_photo_path')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (prodData?.profile_photo_path) {
+      if (prodData.profile_photo_path.startsWith('http')) {
+        avatarUrl = prodData.profile_photo_path;
+      } else {
+        const { data: urlData } = supabase.storage
+          .from('profile-photos')
+          .getPublicUrl(prodData.profile_photo_path);
+        avatarUrl = urlData?.publicUrl || '';
+      }
+    }
+  }
+
   return {
     id: user.id,
     role: profile.role,
     status: profile.status,
     fullName: profile.full_name,
     email: user.email || '',
+    avatarUrl,
   };
 }
 
@@ -445,8 +468,12 @@ function ProducerDashboard({ producer, parcels, cycles, harvests }) {
 function ProducerProfile({ session, onSessionChange }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState(session?.avatarUrl || '');
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const fileInputRef = useRef(null);
+
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -517,6 +544,17 @@ function ProducerProfile({ session, onSessionChange }) {
               city: producerData.city || '',
               locality: producerData.locality || '',
             });
+
+            if (producerData.profile_photo_path) {
+              if (producerData.profile_photo_path.startsWith('http')) {
+                setPhotoUrl(producerData.profile_photo_path);
+              } else {
+                const { data: publicUrlData } = supabase.storage
+                  .from('profile-photos')
+                  .getPublicUrl(producerData.profile_photo_path);
+                if (publicUrlData?.publicUrl) setPhotoUrl(publicUrlData.publicUrl);
+              }
+            }
           } else {
             const names = (profileData?.full_name || session?.fullName || '').split(' ');
             const firstName = names[0] || '';
@@ -547,6 +585,115 @@ function ProducerProfile({ session, onSessionChange }) {
     }
     return () => { active = false; };
   }, [session]);
+
+  const handlePhotoSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setErrorMessage('La taille de la photo ne doit pas dépasser 5 Mo.');
+      return;
+    }
+
+    setPhotoUploading(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    try {
+      if (!supabase) throw new Error('Supabase n’est pas configuré.');
+
+      const fileExt = file.name.split('.').pop() || 'jpg';
+      const filePath = `${session.id}/avatar-${Date.now()}.${fileExt}`;
+
+      const { data: uploadData, error: uploadErr } = await supabase.storage
+        .from('profile-photos')
+        .upload(filePath, file, {
+          upsert: true,
+          contentType: file.type,
+        });
+
+      if (uploadErr) throw uploadErr;
+
+      const { data: publicUrlData } = supabase.storage
+        .from('profile-photos')
+        .getPublicUrl(uploadData.path);
+
+      const publicUrl = publicUrlData?.publicUrl || '';
+      setPhotoUrl(publicUrl);
+
+      // Mettre à jour producers
+      const { data: existingProducer } = await supabase
+        .from('producers')
+        .select('id')
+        .eq('user_id', session.id)
+        .maybeSingle();
+
+      if (existingProducer?.id) {
+        await supabase
+          .from('producers')
+          .update({
+            profile_photo_path: uploadData.path,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingProducer.id);
+      } else {
+        await supabase
+          .from('producers')
+          .insert({
+            user_id: session.id,
+            first_name: formData.firstName.trim() || 'Producteur',
+            last_name: formData.lastName.trim() || '',
+            profile_photo_path: uploadData.path,
+          });
+      }
+
+      if (onSessionChange) {
+        onSessionChange((prev) => ({
+          ...prev,
+          avatarUrl: publicUrl,
+        }));
+      }
+
+      setSuccessMessage('Photo de profil mise à jour avec succès !');
+    } catch (err) {
+      console.error('Erreur téléversement photo:', err);
+      setErrorMessage(err.message || 'Impossible de téléverser la photo.');
+    } finally {
+      setPhotoUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handlePhotoDelete = async () => {
+    setPhotoUploading(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    try {
+      if (supabase && session?.id) {
+        await supabase
+          .from('producers')
+          .update({
+            profile_photo_path: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', session.id);
+      }
+      setPhotoUrl('');
+      if (onSessionChange) {
+        onSessionChange((prev) => ({
+          ...prev,
+          avatarUrl: '',
+        }));
+      }
+      setSuccessMessage('Photo de profil supprimée.');
+    } catch (err) {
+      console.error('Erreur suppression photo:', err);
+      setErrorMessage('Impossible de supprimer la photo.');
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -663,7 +810,13 @@ function ProducerProfile({ session, onSessionChange }) {
 
       <div className="section-card profile-card">
         <div className="profile-hero">
-          <div className="avatar-large">{initialLetter}</div>
+          <div className="avatar-large">
+            {photoUrl ? (
+              <img src={photoUrl} alt="Photo de profil" className="avatar-large-img" />
+            ) : (
+              initialLetter
+            )}
+          </div>
           <div>
             <h3>{formData.firstName || formData.lastName ? `${formData.firstName} ${formData.lastName}`.trim() : session?.fullName}</h3>
             <p>
@@ -673,6 +826,37 @@ function ProducerProfile({ session, onSessionChange }) {
             <span className={`badge ${statusBadgeColors[profileStatus] || 'badge-success'}`}>
               {profileStatus === 'ACTIVE' ? 'Compte actif' : profileStatus === 'PENDING' ? 'En attente' : profileStatus}
             </span>
+
+            <div className="avatar-actions">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                onChange={handlePhotoSelect}
+                style={{ display: 'none' }}
+              />
+              <button
+                type="button"
+                className="avatar-upload-btn"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={photoUploading}
+              >
+                <Camera size={16} />
+                {photoUploading ? 'Téléversement…' : photoUrl ? 'Changer la photo' : 'Ajouter une photo'}
+              </button>
+              {photoUrl && (
+                <button
+                  type="button"
+                  className="avatar-delete-btn"
+                  onClick={handlePhotoDelete}
+                  disabled={photoUploading}
+                  title="Supprimer la photo de profil"
+                >
+                  <Trash2 size={15} />
+                  Supprimer
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -680,7 +864,7 @@ function ProducerProfile({ session, onSessionChange }) {
       <div className="section-card">
         <div className="section-head">
           <h3>Informations personnelles & localisation</h3>
-          <p className="section-hint">Renseignez vos coordonnées et la zone géographique de votre exploitation agricole.</p>
+          <p className="section-hint">Renseignez vos nom, prénom, coordonnées et zone de votre exploitation agricole.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="form-grid two-columns">

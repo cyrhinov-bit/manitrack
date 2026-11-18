@@ -201,6 +201,9 @@ export default function DashboardLayout({ session, role, children, onLogout }) {
             </Link>
           </div>
           <div className="navbar-right">
+            {session?.avatarUrl && (
+              <img src={session.avatarUrl} alt="" className="adminbsb-nav-avatar" />
+            )}
             <span className="adminbsb-role">{role}</span>
             <button type="button" className="adminbsb-logout" onClick={handleLogout}>Déconnexion</button>
           </div>
@@ -211,7 +214,11 @@ export default function DashboardLayout({ session, role, children, onLogout }) {
       <aside className="sidebar">
         <div className="user-info">
           <div className="adminbsb-avatar" aria-hidden="true">
-            {session?.fullName?.charAt(0) || 'M'}
+            {session?.avatarUrl ? (
+              <img src={session.avatarUrl} alt="" className="adminbsb-avatar-img" />
+            ) : (
+              session?.fullName?.charAt(0) || 'M'
+            )}
           </div>
           <div className="info-container">
             <div className="name">{session?.fullName || 'Utilisateur ManiTrack'}</div>

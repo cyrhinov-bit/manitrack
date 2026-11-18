@@ -334,3 +334,25 @@ CREATE TRIGGER trigger_enforce_profile_role
 BEFORE INSERT OR UPDATE ON profiles
 FOR EACH ROW
 EXECUTE FUNCTION public.enforce_profile_role();
+
+-- Buckets de stockage pour photos de profil et photos de terrain
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('profile-photos', 'profile-photos', true, 5242880, ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('field-post-photos', 'field-post-photos', true, 10485760, ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "Profile photos are publicly accessible" ON storage.objects;
+CREATE POLICY "Profile photos are publicly accessible" ON storage.objects FOR SELECT USING (bucket_id = 'profile-photos');
+
+DROP POLICY IF EXISTS "Users can upload their own profile photo" ON storage.objects;
+CREATE POLICY "Users can upload their own profile photo" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'profile-photos' AND auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Users can update their own profile photo" ON storage.objects;
+CREATE POLICY "Users can update their own profile photo" ON storage.objects FOR UPDATE USING (bucket_id = 'profile-photos' AND auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Users can delete their own profile photo" ON storage.objects;
+CREATE POLICY "Users can delete their own profile photo" ON storage.objects FOR DELETE USING (bucket_id = 'profile-photos' AND auth.role() = 'authenticated');
+
