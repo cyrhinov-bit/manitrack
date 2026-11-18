@@ -1,0 +1,17 @@
+{
+  "name": "ManiTrack",
+  "short_name": "ManiTrack",
+  "description": "Application de recensement et de suivi des producteurs de manioc en Cote d'Ivoire.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f8f2",
+  "theme_color": "#034a18",
+  "icons": [
+    {
+      "src": "/manitrack-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
